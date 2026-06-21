@@ -18,14 +18,14 @@
 
     <main>
       <section id="player-section" class="player-panel" aria-label="Reproductor">
-        <div class="player-frame">
-          <div id="player">
-            <div class="player-placeholder">
-              <span aria-hidden="true">▶</span>
-              <p>Elige una canción para empezar</p>
-            </div>
+        <div class="player-frame album-art">
+          <img id="player-cover" class="album-art__image" alt="" hidden />
+          <div id="player-placeholder" class="player-placeholder">
+            <span aria-hidden="true">▶</span>
+            <p>Elige una canción para empezar</p>
           </div>
         </div>
+        <audio id="audio-player" preload="none"></audio>
         <p id="now-playing" class="now-playing" aria-live="polite">Todavía no suena nada</p>
         <div class="player-controls" aria-label="Controles del reproductor">
           <button id="pause-button" class="control-button" type="button" disabled>
@@ -90,7 +90,6 @@
 
     <footer>Hecho para cantar, bailar y repetir ✦</footer>
 
-    <script src="https://www.youtube.com/iframe_api"></script>
     <script src="/static/app.js" defer></script>
   </body>
 </html>

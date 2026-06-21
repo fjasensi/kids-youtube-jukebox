@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi.testclient import TestClient
 
-from app.main import app, get_history_repository
+from app.audio import AudioExtractionError, AudioSource
+from app.main import app, get_audio_resolver, get_history_repository
 from app.settings import Settings, get_settings
 from app.youtube import search_videos
 
@@ -134,6 +135,8 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Disco Estrella", response.text)
+        self.assertIn('id="audio-player"', response.text)
+        self.assertNotIn("youtube.com/iframe_api", response.text)
 
     def test_search_reports_missing_api_key(self) -> None:
         app.dependency_overrides[get_settings] = lambda: make_settings(api_key=None)
@@ -199,6 +202,48 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(repository.history_limits, [5])
         self.assertTrue(health_response.json()["database"]["connected"])
 
+    def test_audio_endpoint_proxies_range_requests(self) -> None:
+        resolver = FakeAudioResolver()
+        app.dependency_overrides[get_audio_resolver] = lambda: resolver
+
+        async def upstream(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.headers.get("range"), "bytes=0-3")
+            return httpx.Response(
+                206,
+                content=b"song",
+                headers={
+                    "content-type": "audio/mp4",
+                    "content-length": "4",
+                    "content-range": "bytes 0-3/100",
+                    "accept-ranges": "bytes",
+                },
+            )
+
+        upstream_client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+        with patch("app.main.httpx.AsyncClient", return_value=upstream_client):
+            with TestClient(app) as client:
+                response = client.get(
+                    "/api/audio/abc123def45",
+                    headers={"Range": "bytes=0-3"},
+                )
+
+        self.assertEqual(response.status_code, 206)
+        self.assertEqual(response.content, b"song")
+        self.assertEqual(response.headers["content-type"], "audio/mp4")
+        self.assertEqual(response.headers["content-range"], "bytes 0-3/100")
+        self.assertEqual(resolver.video_ids, ["abc123def45"])
+
+    def test_audio_endpoint_reports_extraction_errors(self) -> None:
+        app.dependency_overrides[get_audio_resolver] = lambda: FakeAudioResolver(
+            error="Audio no disponible."
+        )
+
+        with TestClient(app) as client:
+            response = client.get("/api/audio/abc123def45")
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "Audio no disponible.")
+
 
 class FakeHistoryRepository:
     enabled = True
@@ -244,3 +289,19 @@ class FakeHistoryRepository:
 
     async def ping(self) -> bool:
         return True
+
+
+class FakeAudioResolver:
+    def __init__(self, error: str | None = None) -> None:
+        self.error = error
+        self.video_ids: list[str] = []
+
+    async def resolve(self, video_id: str) -> AudioSource:
+        self.video_ids.append(video_id)
+        if self.error:
+            raise AudioExtractionError(self.error)
+        return AudioSource(
+            url="https://media.example/song.m4a",
+            content_type="audio/mp4",
+            http_headers={"User-Agent": "test"},
+        )

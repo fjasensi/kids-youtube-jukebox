@@ -1,8 +1,8 @@
 # Kids YouTube Jukebox
 
-Una pequeña jukebox doméstica para buscar canciones de YouTube desde un móvil y reproducirlas en la propia web. El servidor funciona con FastAPI dentro de Podman; PostgreSQL conserva las búsquedas y reproducciones, y el móvil solo necesita un navegador en la misma red Wi-Fi.
+Una pequeña jukebox doméstica para buscar canciones de YouTube desde un móvil y escuchar solo su audio en la propia web. La miniatura se muestra como portada. El servidor funciona con FastAPI dentro de Podman; PostgreSQL conserva las búsquedas y reproducciones, y el móvil solo necesita un navegador en la misma red Wi-Fi.
 
-La app usa exclusivamente **YouTube Data API v3** para buscar y **YouTube IFrame Player API** para reproducir. No descarga vídeos, no extrae audio, no hace scraping y no necesita base de datos ni cuentas de usuario.
+La app usa **YouTube Data API v3** para buscar y **yt-dlp** para resolver la pista de audio. El backend la transmite al navegador sin guardar archivos de vídeo o audio en disco. No utiliza el reproductor embebido de YouTube ni necesita cuentas de usuario.
 
 ## Qué necesitas
 
@@ -107,7 +107,7 @@ Ambos dispositivos deben estar en la misma Wi-Fi. Una red de invitados puede imp
 1. Di al Echo: **“Alexa, emparejar Bluetooth”**.
 2. En el móvil, abre los ajustes de Bluetooth.
 3. Selecciona el Echo en la lista de dispositivos.
-4. Abre la jukebox y reproduce una canción. El vídeo sigue en el móvil y el audio se envía al Echo.
+4. Abre la jukebox y reproduce una canción. La portada aparece en el móvil y el audio se envía al Echo.
 
 También se puede iniciar el emparejamiento desde la app Alexa, en **Dispositivos → Echo y Alexa → tu Echo → Dispositivos Bluetooth**. Los nombres exactos pueden variar según la versión del sistema.
 
@@ -145,7 +145,7 @@ PostgreSQL guarda:
 
 - Cada consulta, su fecha, estado, número de resultados y configuración aplicada.
 - Los vídeos devueltos por cada búsqueda, con posición, identificador, título, canal y miniatura.
-- Cada pulsación en **Reproducir**, enlazada a la búsqueda original y con una instantánea de los datos del vídeo.
+- Cada canción que empieza a sonar, enlazada a la búsqueda original y con una instantánea de sus datos.
 
 La sección plegable **Historial reciente** de la web muestra las últimas búsquedas y canciones reproducidas. También están disponibles:
 
@@ -192,9 +192,13 @@ Dentro del contenedor Uvicorn debe escuchar en `0.0.0.0`. El `Containerfile` inc
 
 Si ves `Falta YOUTUBE_API_KEY`, revisa que `.env` existe, contiene una clave real y que arrancaste con `--env-file .env`. Tras editarlo, recrea el contenedor.
 
-### YouTube no reproduce hasta tocar la pantalla
+### El audio no empieza hasta tocar la pantalla
 
-Es una protección normal de los navegadores móviles contra la reproducción automática. Pulsa **Reproducir** en un resultado o toca el reproductor. La app no intenta evitar esta protección.
+Es una protección normal de los navegadores móviles contra la reproducción automática. Pulsa **Reproducir** en un resultado o **Reanudar** si el navegador ha dejado la pista preparada.
+
+### Una canción no tiene audio disponible
+
+`yt-dlp` resuelve cada pista en el momento de reproducirla. Algunos vídeos privados, eliminados, restringidos por edad o bloqueados geográficamente pueden fallar; elige otro resultado y consulta `podman logs kids-youtube-jukebox` si el problema se repite con todas las canciones.
 
 ### YouTube rechaza la búsqueda
 
@@ -217,10 +221,10 @@ set +a
 uvicorn app.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-8000}"
 ```
 
-La ruta `GET /api/search?q=Frozen%20libre%20soy` devuelve el identificador de la búsqueda persistida y como máximo diez objetos con `video_id`, `title`, `channel_title` y `thumbnail_url`.
+La ruta `GET /api/search?q=Frozen%20libre%20soy` devuelve el identificador de la búsqueda persistida y como máximo diez objetos con `video_id`, `title`, `channel_title` y `thumbnail_url`. La ruta `GET /api/audio/{video_id}` resuelve y transmite la pista seleccionada con soporte para peticiones parciales (`Range`).
 
 ## Referencias oficiales
 
 - [YouTube Data API: `search.list`](https://developers.google.com/youtube/v3/docs/search/list)
-- [YouTube IFrame Player API](https://developers.google.com/youtube/iframe_api_reference)
+- [yt-dlp: uso desde Python y selección de formatos](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)
 - [Podman: publicar puertos con `--publish`](https://docs.podman.io/en/latest/markdown/podman-run.1.html#publish-p-ip-hostport-containerport-protocol)

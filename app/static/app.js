@@ -8,6 +8,9 @@ const clearButton = document.getElementById("clear-button");
 const statusBox = document.getElementById("status");
 const resultsBox = document.getElementById("results");
 const playerSection = document.getElementById("player-section");
+const audioPlayer = document.getElementById("audio-player");
+const playerCover = document.getElementById("player-cover");
+const playerPlaceholder = document.getElementById("player-placeholder");
 const nowPlaying = document.getElementById("now-playing");
 const pauseButton = document.getElementById("pause-button");
 const resumeButton = document.getElementById("resume-button");
@@ -18,9 +21,7 @@ const historyStatus = document.getElementById("history-status");
 const playbackHistory = document.getElementById("playback-history");
 const searchHistory = document.getElementById("search-history");
 
-let player = null;
-let playerReady = false;
-let pendingVideo = null;
+let currentTrack = null;
 let activeRequest = null;
 
 function setStatus(message, kind) {
@@ -77,7 +78,7 @@ function createResultCard(result, searchId) {
   playButton.textContent = "▶ Reproducir";
   playButton.setAttribute("aria-label", "Reproducir " + result.title);
   playButton.addEventListener("click", function () {
-    playVideo(result, searchId);
+    playAudio(result, searchId);
   });
 
   body.append(title, channel, playButton);
@@ -170,19 +171,29 @@ function enablePlayerControls() {
   stopButton.disabled = false;
 }
 
-function playVideo(video, searchId) {
-  pendingVideo = { videoId: video.video_id, title: video.title };
+function playAudio(video, searchId) {
+  currentTrack = {
+    videoId: video.video_id,
+    title: video.title,
+    searchId: searchId,
+    recorded: false,
+  };
+  playerCover.src = video.thumbnail_url;
+  playerCover.alt = "Portada de " + video.title;
+  playerCover.hidden = false;
+  playerPlaceholder.hidden = true;
   nowPlaying.textContent = "Suena: " + video.title;
   enablePlayerControls();
+  setStatus("Preparando el audio…", "loading");
 
-  if (playerReady && player && typeof player.loadVideoById === "function") {
-    player.loadVideoById(video.video_id);
-    pendingVideo = null;
-  } else if (window.YT && window.YT.Player && !player) {
-    createPlayer(video.video_id);
+  audioPlayer.src = "/api/audio/" + encodeURIComponent(video.video_id);
+  audioPlayer.load();
+  const playback = audioPlayer.play();
+  if (playback && typeof playback.catch === "function") {
+    playback.catch(function () {
+      setStatus("El audio está listo. Pulsa Reanudar para escucharlo.");
+    });
   }
-
-  recordPlayback(searchId, video.video_id);
   playerSection.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -203,57 +214,59 @@ async function recordPlayback(searchId, videoId) {
   }
 }
 
-function createPlayer(initialVideoId) {
-  if (player) {
-    return;
+audioPlayer.addEventListener("playing", function () {
+  setStatus("Reproduciendo ♪");
+  if (currentTrack && !currentTrack.recorded) {
+    currentTrack.recorded = true;
+    recordPlayback(currentTrack.searchId, currentTrack.videoId);
   }
-  player = new YT.Player("player", {
-    width: "100%",
-    height: "100%",
-    videoId: initialVideoId || undefined,
-    playerVars: {
-      autoplay: initialVideoId ? 1 : 0,
-      playsinline: 1,
-      rel: 0,
-    },
-    events: {
-      onReady: function (event) {
-        playerReady = true;
-        if (pendingVideo) {
-          event.target.loadVideoById(pendingVideo.videoId);
-          pendingVideo = null;
-        }
-      },
-      onError: function () {
-        setStatus("YouTube no puede reproducir este vídeo. Prueba con otro.", "error");
-      },
-    },
-  });
-}
+});
 
-window.onYouTubeIframeAPIReady = function () {
-  if (pendingVideo) {
-    createPlayer(pendingVideo.videoId);
+audioPlayer.addEventListener("waiting", function () {
+  setStatus("Preparando el audio…", "loading");
+});
+
+audioPlayer.addEventListener("ended", function () {
+  if (currentTrack) {
+    nowPlaying.textContent = "Terminó: " + currentTrack.title;
   }
-};
+  setStatus("");
+});
+
+audioPlayer.addEventListener("error", function () {
+  if (audioPlayer.getAttribute("src")) {
+    setStatus("No se ha podido reproducir esta canción. Prueba con otro resultado.", "error");
+  }
+});
 
 pauseButton.addEventListener("click", function () {
-  if (playerReady && player) {
-    player.pauseVideo();
+  if (!audioPlayer.paused) {
+    audioPlayer.pause();
+    setStatus("En pausa");
   }
 });
 
 resumeButton.addEventListener("click", function () {
-  if (playerReady && player) {
-    player.playVideo();
+  if (audioPlayer.getAttribute("src")) {
+    const playback = audioPlayer.play();
+    if (playback && typeof playback.catch === "function") {
+      playback.catch(function () {
+        setStatus("No se ha podido reanudar el audio.", "error");
+      });
+    }
   }
 });
 
 stopButton.addEventListener("click", function () {
-  if (playerReady && player) {
-    player.stopVideo();
-    nowPlaying.textContent = "Reproducción parada";
-  }
+  audioPlayer.pause();
+  audioPlayer.removeAttribute("src");
+  audioPlayer.load();
+  currentTrack = null;
+  pauseButton.disabled = true;
+  resumeButton.disabled = true;
+  stopButton.disabled = true;
+  nowPlaying.textContent = "Reproducción parada";
+  setStatus("");
 });
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;

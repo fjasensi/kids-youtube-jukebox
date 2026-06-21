@@ -6,11 +6,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, AsyncIterator
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from app.audio import AudioExtractionError, AudioResolver
 from app.database import open_database
 from app.history import HistoryRepository, NoOpHistoryRepository
 from app.settings import Settings, get_settings
@@ -18,6 +20,7 @@ from app.youtube import YouTubeSearchError, search_videos
 
 
 STATIC_DIR = Path(__file__).parent / "static"
+audio_resolver = AudioResolver()
 
 
 @asynccontextmanager
@@ -33,8 +36,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Kids YouTube Jukebox",
-    description="Buscador y reproductor casero basado en las API oficiales de YouTube.",
-    version="1.1.0",
+    description="Buscador de YouTube con reproducción de audio mediante yt-dlp.",
+    version="2.0.0",
     lifespan=lifespan,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -51,6 +54,10 @@ def get_history_repository(request: Request) -> HistoryRepository:
         "history_repository",
         NoOpHistoryRepository(),
     )
+
+
+def get_audio_resolver() -> AudioResolver:
+    return audio_resolver
 
 
 @app.get("/", include_in_schema=False)
@@ -116,6 +123,68 @@ async def record_playback(
             detail="El vídeo no pertenece a la búsqueda indicada.",
         )
     return {"recorded": True, "playback": recorded}
+
+
+@app.get("/api/audio/{video_id}")
+async def stream_audio(
+    video_id: str,
+    request: Request,
+    resolver: Annotated[AudioResolver, Depends(get_audio_resolver)],
+) -> StreamingResponse:
+    try:
+        source = await resolver.resolve(video_id)
+    except AudioExtractionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    upstream_headers = dict(source.http_headers)
+    upstream_headers["Accept-Encoding"] = "identity"
+    if byte_range := request.headers.get("range"):
+        upstream_headers["Range"] = byte_range
+
+    client = httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=httpx.Timeout(connect=15, read=None, write=15, pool=15),
+    )
+    try:
+        upstream = await client.send(
+            client.build_request("GET", source.url, headers=upstream_headers),
+            stream=True,
+        )
+    except httpx.RequestError as exc:
+        await client.aclose()
+        raise HTTPException(
+            status_code=502,
+            detail="No se ha podido conectar con el servidor de audio.",
+        ) from exc
+
+    if upstream.status_code not in {200, 206}:
+        await upstream.aclose()
+        await client.aclose()
+        raise HTTPException(
+            status_code=502,
+            detail="YouTube no ha permitido reproducir el audio de esta canción.",
+        )
+
+    response_headers = {
+        name: value
+        for name in ("content-length", "content-range", "accept-ranges")
+        if (value := upstream.headers.get(name)) is not None
+    }
+
+    async def body() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        body(),
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type", source.content_type),
+        headers=response_headers,
+    )
 
 
 @app.get("/api/history")
