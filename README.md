@@ -1,38 +1,59 @@
 # Kids YouTube Jukebox
 
-Una pequeña jukebox doméstica para buscar canciones de YouTube desde un móvil y escuchar solo su audio en la propia web. La miniatura se muestra como portada. El servidor funciona con FastAPI dentro de Podman; PostgreSQL conserva las búsquedas y reproducciones, y el móvil solo necesita un navegador en la misma red Wi-Fi.
+A small, touch-friendly home jukebox for searching YouTube songs and listening to
+audio from an old mobile phone. The backend runs with FastAPI in Podman,
+PostgreSQL stores search and playback history, and the phone only needs a web
+browser on the same Wi-Fi network.
 
-La app usa **YouTube Data API v3** para buscar y **yt-dlp** para resolver la pista de audio. El backend la transmite al navegador sin guardar archivos de vídeo o audio en disco. No utiliza el reproductor embebido de YouTube ni necesita cuentas de usuario.
+YouTube Data API v3 provides search results, titles, channels, and thumbnails.
+`yt-dlp` resolves the selected audio stream, which the backend relays to the
+browser without saving video or audio files to disk.
 
-## Qué necesitas
+![Disco Estrella mobile interface](docs/images/app-mobile.jpg)
 
-- Un Mac con [Podman Desktop](https://podman-desktop.io/) o Podman instalado.
-- Un proyecto de Google Cloud con **YouTube Data API v3** habilitada.
-- Una clave de API de YouTube.
-- El ordenador y el móvil conectados a la misma Wi-Fi.
+## Features
 
-## 1. Conseguir `YOUTUBE_API_KEY`
+- Mobile-first interface with large touch targets.
+- Up to ten relevant YouTube search results.
+- Audio-only playback with the video thumbnail displayed as cover art.
+- Pause, resume, and stop controls.
+- Optional Spanish voice search through the Web Speech API.
+- Persistent PostgreSQL history for searches and played songs.
+- Podman-compatible container setup for macOS and Linux.
+- No login or user account required on a trusted home network.
 
-1. Abre [Google Cloud Console](https://console.cloud.google.com/).
-2. Crea un proyecto o selecciona uno existente.
-3. En **APIs y servicios → Biblioteca**, busca y habilita **YouTube Data API v3**.
-4. En **APIs y servicios → Credenciales**, elige **Crear credenciales → Clave de API**.
-5. Copia la clave. Google recomienda restringirla; como mínimo, limita la clave a **YouTube Data API v3**. Si aplicas restricciones por IP, recuerda que las peticiones salen desde el ordenador que ejecuta el contenedor.
+## Requirements
 
-La API de búsqueda consume cuota del proyecto de Google. Si la cuota diaria se agota, la app mostrará el error recibido de YouTube.
+- Podman Desktop or Podman.
+- A Google Cloud project with **YouTube Data API v3** enabled.
+- A YouTube API key.
+- A computer and mobile phone connected to the same Wi-Fi network.
 
-## 2. Configurar el entorno
+## 1. Get a YouTube API key
 
-Desde la carpeta del proyecto:
+1. Open the [Google Cloud Console](https://console.cloud.google.com/).
+2. Create a project or select an existing one.
+3. Open **APIs & Services → Library** and enable **YouTube Data API v3**.
+4. Open **APIs & Services → Credentials** and select
+   **Create credentials → API key**.
+5. Copy the key. Google recommends restricting it; at minimum, restrict it to
+   YouTube Data API v3. If you add an IP restriction, use the public IP of the
+   computer or server running the application.
+
+YouTube searches consume the Google Cloud project's daily API quota.
+
+## 2. Configure the environment
+
+Create your local environment file:
 
 ```sh
 cp .env.example .env
 ```
 
-Edita `.env` y sustituye el valor de ejemplo:
+Edit `.env` and replace the example values:
 
 ```dotenv
-YOUTUBE_API_KEY=tu_clave_real
+YOUTUBE_API_KEY=your_real_api_key
 YOUTUBE_REGION_CODE=ES
 YOUTUBE_RELEVANCE_LANGUAGE=es
 YOUTUBE_SAFE_SEARCH=none
@@ -40,175 +61,202 @@ YOUTUBE_MUSIC_ONLY=true
 APP_PORT=8000
 POSTGRES_DB=jukebox
 POSTGRES_USER=jukebox
-POSTGRES_PASSWORD=elige_una_contraseña_local
+POSTGRES_PASSWORD=choose_a_local_password
 ```
 
-`.env` está excluido de Git para evitar publicar la clave.
+`.env` is ignored by Git and must never be committed.
 
-## 3. Construir y ejecutar con Podman
+## 3. Build and run with Podman
 
-Si usas Podman en macOS por primera vez, inicia su máquina virtual:
+On macOS, start the Podman virtual machine first if needed:
 
 ```sh
 podman machine init
 podman machine start
 ```
 
-La forma recomendada levanta la app y PostgreSQL juntos, espera a que la base de datos esté preparada y crea automáticamente las tablas:
+The recommended setup starts the application and PostgreSQL together, waits for
+the database to become healthy, and creates the required tables automatically:
 
 ```sh
 podman compose up --build -d
-```
-
-Comprueba el estado:
-
-```sh
 podman compose ps
 ```
 
-La app escucha dentro del contenedor en `0.0.0.0`. En el propio Mac, abre [http://localhost:8000](http://localhost:8000).
+Open [http://localhost:8000](http://localhost:8000) on the host computer.
 
-Para ver los logs o detener el stack:
+View logs or stop the stack with:
 
 ```sh
 podman compose logs -f jukebox
 podman compose down
 ```
 
-Los datos permanecen en el volumen `postgres_data` al ejecutar `podman compose down`. Solo se eliminan si solicitas explícitamente borrar volúmenes.
+The history remains in the `postgres_data` volume after `podman compose down`.
+It is deleted only if you explicitly remove the volume.
 
-### Ejecución sin PostgreSQL
+### Run without PostgreSQL
 
-La imagen todavía puede ejecutarse sola, pero el historial aparecerá desactivado:
+The image can run on its own, but history will be disabled:
 
 ```sh
 podman build -t kids-youtube-jukebox .
 podman run --rm --env-file .env -p 8000:8000 kids-youtube-jukebox
 ```
 
-## 4. Abrirla desde el móvil
+## 4. Open the jukebox from a phone
 
-Busca la IP local del Mac. Normalmente la Wi-Fi es `en0`:
+Find the Mac's local Wi-Fi address, usually on `en0`:
 
 ```sh
 ipconfig getifaddr en0
 ```
 
-Si no devuelve nada, prueba `ipconfig getifaddr en1` o mira **Ajustes del Sistema → Wi-Fi → Detalles → TCP/IP**. Si la dirección es, por ejemplo, `192.168.1.45`, abre esto en el navegador del móvil:
+If that returns nothing, try `ipconfig getifaddr en1` or open
+**System Settings → Wi-Fi → Details → TCP/IP**.
+
+For example, if the address is `192.168.1.45`, open this URL on the phone:
 
 ```text
 http://192.168.1.45:8000
 ```
 
-Ambos dispositivos deben estar en la misma Wi-Fi. Una red de invitados puede impedir que los dispositivos se vean entre sí.
+Both devices must be on the same Wi-Fi. Guest networks often isolate devices
+from each other.
 
-## 5. Sacar el audio por un Amazon Echo
+## 5. Send the audio to an Amazon Echo
 
-1. Di al Echo: **“Alexa, emparejar Bluetooth”**.
-2. En el móvil, abre los ajustes de Bluetooth.
-3. Selecciona el Echo en la lista de dispositivos.
-4. Abre la jukebox y reproduce una canción. La portada aparece en el móvil y el audio se envía al Echo.
+1. Say **“Alexa, pair Bluetooth.”**
+2. Open Bluetooth settings on the phone.
+3. Select the Echo from the available devices.
+4. Open the jukebox and play a song. The phone displays the cover art while the
+   audio is sent to the Echo.
 
-También se puede iniciar el emparejamiento desde la app Alexa, en **Dispositivos → Echo y Alexa → tu Echo → Dispositivos Bluetooth**. Los nombres exactos pueden variar según la versión del sistema.
+Pairing can also be started in the Alexa app under
+**Devices → Echo & Alexa → your Echo → Bluetooth Devices**. Exact labels may
+vary between app versions.
 
-## Configuración de las búsquedas
+## Search configuration
 
-### Solo música
+### Music-only results
 
-Con `YOUTUBE_MUSIC_ONLY=true`, la app añade `videoCategoryId=10` para intentar limitar los resultados a la categoría Música. Para buscar cualquier tipo de vídeo:
+With `YOUTUBE_MUSIC_ONLY=true`, the application adds `videoCategoryId=10` to
+request results from YouTube's Music category. To search every video category:
 
 ```dotenv
 YOUTUBE_MUSIC_ONLY=false
 ```
 
-Reinicia el contenedor después de cambiar `.env`.
+Restart the application after changing `.env`.
 
 ### Safe Search
 
-El valor predeterminado solicitado es:
+The default value is:
 
 ```dotenv
 YOUTUBE_SAFE_SEARCH=none
 ```
 
-YouTube también acepta `moderate` y `strict`:
+YouTube also accepts `moderate` and `strict`:
 
 ```dotenv
 YOUTUBE_SAFE_SEARCH=strict
 ```
 
-Este ajuste lo aplica YouTube a la búsqueda. La aplicación no implementa controles parentales propios.
+This setting is applied by YouTube to search requests. The application does not
+implement its own parental controls.
 
-## Historial persistente
+## Persistent history
 
-PostgreSQL guarda:
+PostgreSQL stores:
 
-- Cada consulta, su fecha, estado, número de resultados y configuración aplicada.
-- Los vídeos devueltos por cada búsqueda, con posición, identificador, título, canal y miniatura.
-- Cada canción que empieza a sonar, enlazada a la búsqueda original y con una instantánea de sus datos.
+- Every query, timestamp, status, result count, and search configuration.
+- The returned videos, including position, ID, title, channel, and thumbnail.
+- Every song that starts playing, linked to its original search.
 
-La sección plegable **Historial reciente** de la web muestra las últimas búsquedas y canciones reproducidas. También están disponibles:
+The **Recent history** section displays the latest searches and played songs.
+The same data is available through:
 
 - `GET /api/history?limit=20`
 - `POST /api/playback`
-- `GET /health`, que indica si PostgreSQL está conectado.
+- `GET /health`
 
-Las tablas se crean automáticamente al iniciar la aplicación. Para una copia de seguridad local del historial:
+Tables are created automatically at startup. To create a local backup:
 
 ```sh
 podman compose exec db pg_dump -U jukebox jukebox > jukebox-backup.sql
 ```
 
-## Problemas frecuentes
+## Security
 
-### El móvil no conecta
+This project is designed for a trusted home network. Do not expose the current
+container directly to the public Internet. It intentionally has no
+authentication, so a public deployment would expose listening history and allow
+other people to consume YouTube API quota and audio-proxy bandwidth.
 
-- Comprueba primero que `http://localhost:8000` funciona en el Mac.
-- Confirma que móvil y Mac están en la misma Wi-Fi y no en una red de invitados aislada.
-- Revisa que usas la IP actual del Mac y el puerto correcto.
-- macOS puede pedir permiso para aceptar conexiones entrantes; concédelo a Podman. Revisa también **Ajustes del Sistema → Red → Firewall**.
-- Comprueba que la máquina de Podman está en marcha con `podman machine list`.
+Before an Internet-facing deployment, add HTTPS, authentication, rate limiting,
+bounded concurrency and caching, signed audio URLs, strong database credentials,
+and regular backups. Expose only the reverse proxy on port 443.
 
-### PostgreSQL no está listo
+## Troubleshooting
 
-- Ejecuta `podman compose ps` y comprueba que `db` está saludable.
-- Revisa `podman compose logs db`.
-- Confirma que `POSTGRES_DB`, `POSTGRES_USER` y `POSTGRES_PASSWORD` tienen valores coherentes en `.env`.
-- Si cambias usuario o contraseña después del primer arranque, el volumen conserva las credenciales anteriores. Restaura los valores previos o crea un volumen nuevo solo si no necesitas conservar el historial.
+### The phone cannot connect
 
-### El puerto no está expuesto
+- Confirm that `http://localhost:8000` works on the host computer.
+- Check that the phone and computer use the same non-guest Wi-Fi.
+- Verify the current local IP address and port.
+- Allow incoming Podman connections in the macOS firewall if prompted.
+- Check that the Podman machine is running with `podman machine list`.
 
-El comando debe incluir `-p 8000:8000`. Compruébalo con:
+### PostgreSQL is not ready
+
+- Run `podman compose ps` and confirm that `db` is healthy.
+- Inspect `podman compose logs db`.
+- Check the `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` values.
+- If credentials are changed after the first startup, the existing volume keeps
+  the old credentials. Restore the previous values or remove the volume only if
+  its history is no longer needed.
+
+### The port is not published
+
+The run command must include `-p 8000:8000`. Check it with:
 
 ```sh
 podman port kids-youtube-jukebox
 ```
 
-### La app escucha en `127.0.0.1`
+### The application listens on `127.0.0.1`
 
-Dentro del contenedor Uvicorn debe escuchar en `0.0.0.0`. El `Containerfile` incluido ya lo configura. En los logs debe aparecer `Uvicorn running on http://0.0.0.0:8000`.
+Uvicorn must listen on `0.0.0.0` inside the container. The included
+`Containerfile` already configures this.
 
-### Falta la API key
+### The API key is missing
 
-Si ves `Falta YOUTUBE_API_KEY`, revisa que `.env` existe, contiene una clave real y que arrancaste con `--env-file .env`. Tras editarlo, recrea el contenedor.
+If the UI reports `YOUTUBE_API_KEY` as missing, check that `.env` contains the
+real key and that the container was started with the environment file. Recreate
+the container after editing it.
 
-### El audio no empieza hasta tocar la pantalla
+### Audio does not start automatically
 
-Es una protección normal de los navegadores móviles contra la reproducción automática. Pulsa **Reproducir** en un resultado o **Reanudar** si el navegador ha dejado la pista preparada.
+Mobile browsers can block automatic playback. Tap **Play** on a result and then
+tap **Resume** if the browser leaves the track prepared but paused.
 
-### Una canción no tiene audio disponible
+### A song has no available audio
 
-`yt-dlp` resuelve cada pista en el momento de reproducirla. Algunos vídeos privados, eliminados, restringidos por edad o bloqueados geográficamente pueden fallar; elige otro resultado y consulta `podman logs kids-youtube-jukebox` si el problema se repite con todas las canciones.
+`yt-dlp` resolves each track at playback time. Private, deleted, age-restricted,
+or geographically blocked videos can fail. Select another result and inspect
+`podman logs kids-youtube-jukebox` if every song fails.
 
-### YouTube rechaza la búsqueda
+### YouTube rejects searches
 
-Revisa que YouTube Data API v3 esté habilitada, que la clave no tenga restricciones incompatibles y que el proyecto conserve cuota. Consulta los logs con:
+Check that YouTube Data API v3 is enabled, the API key restrictions are
+compatible with the server, and the project still has quota. Inspect logs with:
 
 ```sh
 podman logs kids-youtube-jukebox
 ```
 
-## Desarrollo local sin contenedor
+## Local development
 
 ```sh
 python3.12 -m venv .venv
@@ -221,10 +269,25 @@ set +a
 uvicorn app.main:app --reload --host 0.0.0.0 --port "${APP_PORT:-8000}"
 ```
 
-La ruta `GET /api/search?q=Frozen%20libre%20soy` devuelve el identificador de la búsqueda persistida y como máximo diez objetos con `video_id`, `title`, `channel_title` y `thumbnail_url`. La ruta `GET /api/audio/{video_id}` resuelve y transmite la pista seleccionada con soporte para peticiones parciales (`Range`).
+Run the test suite with:
 
-## Referencias oficiales
+```sh
+python -m unittest discover -s tests -v
+```
 
-- [YouTube Data API: `search.list`](https://developers.google.com/youtube/v3/docs/search/list)
-- [yt-dlp: uso desde Python y selección de formatos](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)
-- [Podman: publicar puertos con `--publish`](https://docs.podman.io/en/latest/markdown/podman-run.1.html#publish-p-ip-hostport-containerport-protocol)
+## HTTP API
+
+- `GET /api/search?q=Frozen%20libre%20soy` returns a persisted search ID and up
+  to ten objects containing `video_id`, `title`, `channel_title`, and
+  `thumbnail_url`.
+- `GET /api/audio/{video_id}` resolves and relays the selected audio stream with
+  HTTP Range support.
+- `POST /api/playback` records a successfully started track.
+- `GET /api/history?limit=20` returns recent searches and playback events.
+- `GET /health` reports application and database health.
+
+## References
+
+- [YouTube Data API `search.list`](https://developers.google.com/youtube/v3/docs/search/list)
+- [Embedding yt-dlp in Python](https://github.com/yt-dlp/yt-dlp#embedding-yt-dlp)
+- [Podman port publishing](https://docs.podman.io/en/latest/markdown/podman-run.1.html#publish-p-ip-hostport-containerport-protocol)

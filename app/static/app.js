@@ -347,7 +347,7 @@ function renderPlaybackHistory(items) {
     button.textContent = "▶";
     button.setAttribute("aria-label", "Volver a reproducir " + item.title);
     button.addEventListener("click", function () {
-      playVideo(item, item.search_id);
+      playAudio(item, item.search_id);
     });
 
     row.append(image, text, button);
