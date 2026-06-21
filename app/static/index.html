@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#17152a" />
+    <title>Disco Estrella</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="hero__icon" aria-hidden="true">♫</div>
+      <div>
+        <p class="eyebrow">Mi música</p>
+        <h1>Disco Estrella</h1>
+      </div>
+    </header>
+
+    <main>
+      <section id="player-section" class="player-panel" aria-label="Reproductor">
+        <div class="player-frame">
+          <div id="player">
+            <div class="player-placeholder">
+              <span aria-hidden="true">▶</span>
+              <p>Elige una canción para empezar</p>
+            </div>
+          </div>
+        </div>
+        <p id="now-playing" class="now-playing" aria-live="polite">Todavía no suena nada</p>
+        <div class="player-controls" aria-label="Controles del reproductor">
+          <button id="pause-button" class="control-button" type="button" disabled>
+            <span aria-hidden="true">⏸</span> Pausar
+          </button>
+          <button id="resume-button" class="control-button control-button--primary" type="button" disabled>
+            <span aria-hidden="true">▶</span> Reanudar
+          </button>
+          <button id="stop-button" class="control-button" type="button" disabled>
+            <span aria-hidden="true">■</span> Parar
+          </button>
+        </div>
+      </section>
+
+      <section class="search-panel" aria-labelledby="search-title">
+        <h2 id="search-title">¿Qué quieres escuchar?</h2>
+        <form id="search-form" novalidate>
+          <label class="sr-only" for="search-input">Nombre de la canción</label>
+          <input
+            id="search-input"
+            name="q"
+            type="search"
+            maxlength="200"
+            placeholder="Escribe una canción…"
+            autocomplete="off"
+            enterkeyhint="search"
+            required
+          />
+          <div class="search-actions">
+            <button id="search-button" class="big-button big-button--search" type="submit">
+              <span aria-hidden="true">⌕</span> Buscar
+            </button>
+            <button id="voice-button" class="big-button big-button--voice" type="button" hidden>
+              🎤 Decir canción
+            </button>
+          </div>
+        </form>
+        <button id="clear-button" class="clear-button" type="button">Limpiar búsqueda</button>
+      </section>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <section id="results" class="results" aria-label="Resultados de búsqueda"></section>
+
+      <details id="history-panel" class="history-panel">
+        <summary>🕘 Historial reciente</summary>
+        <div class="history-panel__body">
+          <button id="refresh-history-button" class="history-refresh" type="button">
+            Actualizar historial
+          </button>
+          <p id="history-status" class="history-status" role="status" aria-live="polite"></p>
+          <section aria-labelledby="playback-history-title">
+            <h2 id="playback-history-title">Canciones reproducidas</h2>
+            <div id="playback-history" class="history-list"></div>
+          </section>
+          <section aria-labelledby="search-history-title">
+            <h2 id="search-history-title">Búsquedas</h2>
+            <div id="search-history" class="history-list"></div>
+          </section>
+        </div>
+      </details>
+    </main>
+
+    <footer>Hecho para cantar, bailar y repetir ✦</footer>
+
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

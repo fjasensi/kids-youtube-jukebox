@@ -1,0 +1,49 @@
+services:
+  db:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-jukebox}
+      POSTGRES_USER: ${POSTGRES_USER:-jukebox}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jukebox_local}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  jukebox:
+    build:
+      context: .
+      dockerfile: Containerfile
+    image: kids-youtube-jukebox
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      YOUTUBE_REGION_CODE: ${YOUTUBE_REGION_CODE:-ES}
+      YOUTUBE_RELEVANCE_LANGUAGE: ${YOUTUBE_RELEVANCE_LANGUAGE:-es}
+      YOUTUBE_SAFE_SEARCH: ${YOUTUBE_SAFE_SEARCH:-none}
+      YOUTUBE_MUSIC_ONLY: ${YOUTUBE_MUSIC_ONLY:-true}
+      APP_PORT: ${APP_PORT:-8000}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jukebox}:${POSTGRES_PASSWORD:-jukebox_local}@db:5432/${POSTGRES_DB:-jukebox}
+    ports:
+      - "${APP_PORT:-8000}:${APP_PORT:-8000}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.getenv('APP_PORT', '8000') + '/health', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
