@@ -70,6 +70,7 @@ async def search(
     q: Annotated[str, Query(min_length=1, max_length=200)],
     settings: Annotated[Settings, Depends(get_settings)],
     history: Annotated[HistoryRepository, Depends(get_history_repository)],
+    resolver: Annotated[AudioResolver, Depends(get_audio_resolver)],
 ) -> dict[str, object]:
     query = q.strip()
     if not query:
@@ -88,7 +89,8 @@ async def search(
         )
 
     try:
-        results = await search_videos(query, settings)
+        candidates = await search_videos(query, settings)
+        results = await resolver.filter_playable(candidates)
     except YouTubeSearchError as exc:
         await history.record_search(
             query,

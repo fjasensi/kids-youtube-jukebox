@@ -59,7 +59,7 @@ def _normalise_results(payload: dict[str, Any]) -> list[dict[str, str]]:
                 "thumbnail_url": str(thumbnail.get("url", "")),
             }
         )
-    return results[:10]
+    return results[:25]
 
 
 async def search_videos(query: str, settings: Settings) -> list[dict[str, str]]:
@@ -70,7 +70,8 @@ async def search_videos(query: str, settings: Settings) -> list[dict[str, str]]:
         "q": query,
         "key": settings.youtube_api_key or "",
         "type": "video",
-        "maxResults": 10,
+        "videoSyndicated": "true",
+        "maxResults": 25,
         "order": "relevance",
         "regionCode": settings.youtube_region_code,
         "relevanceLanguage": settings.youtube_relevance_language,

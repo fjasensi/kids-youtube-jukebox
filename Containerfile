@@ -1,10 +1,16 @@
+FROM denoland/deno:bin-2.5.6 AS deno
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    DENO_NO_UPDATE_CHECK=1 \
+    DENO_NO_PROMPT=1 \
     APP_PORT=8000
 
 WORKDIR /app
+
+COPY --from=deno /deno /usr/local/bin/deno
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \

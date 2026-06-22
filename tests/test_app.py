@@ -34,7 +34,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.youtube_region_code, "ES")
         self.assertEqual(settings.youtube_relevance_language, "es")
         self.assertEqual(settings.youtube_safe_search, "none")
-        self.assertTrue(settings.youtube_music_only)
+        self.assertFalse(settings.youtube_music_only)
         self.assertEqual(settings.app_port, 8000)
         self.assertIsNone(settings.database_url)
 
@@ -95,7 +95,8 @@ class YouTubeClientTests(unittest.IsolatedAsyncioTestCase):
                 "q": "Frozen libre soy",
                 "key": "test-key",
                 "type": "video",
-                "maxResults": 10,
+                "videoSyndicated": "true",
+                "maxResults": 25,
                 "order": "relevance",
                 "regionCode": "ES",
                 "relevanceLanguage": "es",
@@ -154,6 +155,7 @@ class ApiTests(unittest.TestCase):
         app.dependency_overrides[get_settings] = make_settings
         repository = FakeHistoryRepository()
         app.dependency_overrides[get_history_repository] = lambda: repository
+        app.dependency_overrides[get_audio_resolver] = FakeAudioResolver
         expected = [
             {
                 "video_id": "abc123",
@@ -174,6 +176,38 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(repository.searches[0]["query"], "Frozen")
         self.assertEqual(repository.searches[0]["status"], "success")
+
+    def test_search_discards_results_without_audio(self) -> None:
+        app.dependency_overrides[get_settings] = make_settings
+        repository = FakeHistoryRepository()
+        resolver = FakeAudioResolver(playable_video_ids={"playable123"})
+        app.dependency_overrides[get_history_repository] = lambda: repository
+        app.dependency_overrides[get_audio_resolver] = lambda: resolver
+        candidates = [
+            {
+                "video_id": "blocked1234",
+                "title": "Bloqueada",
+                "channel_title": "Canal",
+                "thumbnail_url": "https://img.example/blocked.jpg",
+            },
+            {
+                "video_id": "playable123",
+                "title": "Disponible",
+                "channel_title": "Canal",
+                "thumbnail_url": "https://img.example/playable.jpg",
+            },
+        ]
+
+        with patch("app.main.search_videos", new=AsyncMock(return_value=candidates)):
+            with TestClient(app) as client:
+                response = client.get("/api/search", params={"q": "infantil"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [item["video_id"] for item in response.json()["results"]],
+            ["playable123"],
+        )
+        self.assertEqual(repository.searches[0]["results"], [candidates[1]])
 
     def test_search_rejects_whitespace(self) -> None:
         app.dependency_overrides[get_settings] = make_settings
@@ -292,9 +326,29 @@ class FakeHistoryRepository:
 
 
 class FakeAudioResolver:
-    def __init__(self, error: str | None = None) -> None:
+    def __init__(
+        self,
+        error: str | None = None,
+        playable_video_ids: set[str] | None = None,
+    ) -> None:
         self.error = error
+        self.playable_video_ids = playable_video_ids
         self.video_ids: list[str] = []
+
+    async def filter_playable(
+        self,
+        results: list[dict[str, str]],
+        *,
+        limit: int = 10,
+        batch_size: int = 10,
+    ) -> list[dict[str, str]]:
+        if self.playable_video_ids is None:
+            return results[:limit]
+        return [
+            result
+            for result in results
+            if result["video_id"] in self.playable_video_ids
+        ][:limit]
 
     async def resolve(self, video_id: str) -> AudioSource:
         self.video_ids.append(video_id)

@@ -66,7 +66,7 @@ class Settings:
             youtube_region_code=region_code,
             youtube_relevance_language=relevance_language,
             youtube_safe_search=safe_search,
-            youtube_music_only=_read_bool("YOUTUBE_MUSIC_ONLY", True),
+            youtube_music_only=_read_bool("YOUTUBE_MUSIC_ONLY", False),
             app_port=_read_port(),
             database_url=os.getenv("DATABASE_URL", "").strip() or None,
         )
