@@ -57,7 +57,7 @@ YOUTUBE_API_KEY=your_real_api_key
 YOUTUBE_REGION_CODE=ES
 YOUTUBE_RELEVANCE_LANGUAGE=es
 YOUTUBE_SAFE_SEARCH=none
-YOUTUBE_MUSIC_ONLY=false
+YOUTUBE_MUSIC_ONLY=true
 APP_PORT=8000
 POSTGRES_DB=jukebox
 POSTGRES_USER=jukebox
@@ -140,16 +140,16 @@ vary between app versions.
 
 ### Music-only results
 
-The default is to search every video category:
-
-```dotenv
-YOUTUBE_MUSIC_ONLY=false
-```
-
-To restrict searches to YouTube's Music category, enable:
+By default, the application restricts results to YouTube's Music category:
 
 ```dotenv
 YOUTUBE_MUSIC_ONLY=true
+```
+
+To search every video category instead, disable the filter:
+
+```dotenv
+YOUTUBE_MUSIC_ONLY=false
 ```
 
 Restart the application after changing `.env`.

@@ -34,7 +34,7 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.youtube_region_code, "ES")
         self.assertEqual(settings.youtube_relevance_language, "es")
         self.assertEqual(settings.youtube_safe_search, "none")
-        self.assertFalse(settings.youtube_music_only)
+        self.assertTrue(settings.youtube_music_only)
         self.assertEqual(settings.app_port, 8000)
         self.assertIsNone(settings.database_url)
 
