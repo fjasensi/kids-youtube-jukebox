@@ -10,6 +10,9 @@ const resultsBox = document.getElementById("results");
 const playFavoritesButton = document.getElementById("play-favorites-button");
 const favoritesEmpty = document.getElementById("favorites-empty");
 const favoritesList = document.getElementById("favorites-list");
+const activeProfileName = document.getElementById("active-profile-name");
+const profileList = document.getElementById("profile-list");
+const addProfileButton = document.getElementById("add-profile-button");
 const playerSection = document.getElementById("player-section");
 const audioPlayer = document.getElementById("audio-player");
 const playerCover = document.getElementById("player-cover");
@@ -24,11 +27,21 @@ const historyStatus = document.getElementById("history-status");
 const playbackHistory = document.getElementById("playback-history");
 const searchHistory = document.getElementById("search-history");
 
+const DEFAULT_PROFILES = [
+  { id: "familia", name: "Familia" },
+  { id: "hija", name: "Hija" },
+  { id: "yo", name: "Yo" },
+];
+const PROFILES_STORAGE_KEY = "discoEstrellaProfiles";
+const ACTIVE_PROFILE_STORAGE_KEY = "discoEstrellaActiveProfile";
+
 let currentTrack = null;
 let activeRequest = null;
 let activePlaylist = null;
 let favoritesEnabled = false;
 let favoriteTracks = [];
+let profiles = loadProfiles();
+let activeProfile = readActiveProfile(profiles);
 
 function setStatus(message, kind) {
   statusBox.textContent = message || "";
@@ -66,6 +79,163 @@ function readFavoriteApiError(response, payload) {
   return "No se han podido guardar las favoritas.";
 }
 
+function readStorageItem(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch (error) {
+    return null;
+  }
+}
+
+function writeStorageItem(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch (error) {
+    return;
+  }
+}
+
+function isValidProfileId(value) {
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value);
+}
+
+function normaliseProfile(item) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const id = typeof item.id === "string" ? item.id.trim().toLowerCase() : "";
+  const name = typeof item.name === "string" ? item.name.trim() : "";
+  if (!isValidProfileId(id) || !name) {
+    return null;
+  }
+  return { id: id, name: name.slice(0, 32) };
+}
+
+function mergeProfiles(items) {
+  const merged = [];
+  const seen = new Set();
+  items.forEach(function (item) {
+    const profile = normaliseProfile(item);
+    if (!profile || seen.has(profile.id)) {
+      return;
+    }
+    seen.add(profile.id);
+    merged.push(profile);
+  });
+  return merged.length > 0 ? merged : DEFAULT_PROFILES.slice();
+}
+
+function loadProfiles() {
+  const storedValue = readStorageItem(PROFILES_STORAGE_KEY);
+  let storedProfiles = [];
+  if (storedValue) {
+    try {
+      const parsed = JSON.parse(storedValue);
+      storedProfiles = Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      storedProfiles = [];
+    }
+  }
+  return mergeProfiles(DEFAULT_PROFILES.concat(storedProfiles));
+}
+
+function saveProfiles() {
+  writeStorageItem(PROFILES_STORAGE_KEY, JSON.stringify(profiles));
+}
+
+function readActiveProfile(profileItems) {
+  const storedId = readStorageItem(ACTIVE_PROFILE_STORAGE_KEY);
+  return (
+    profileItems.find(function (profile) {
+      return profile.id === storedId;
+    }) || profileItems[0]
+  );
+}
+
+function saveActiveProfile() {
+  writeStorageItem(ACTIVE_PROFILE_STORAGE_KEY, activeProfile.id);
+}
+
+function createProfileId(name) {
+  const fallback = "perfil";
+  const normalised = name.normalize
+    ? name.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    : name;
+  let base = normalised
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "")
+    .slice(0, 48);
+  if (!base || !/^[a-z0-9]/.test(base)) {
+    base = fallback;
+  }
+
+  const existingIds = new Set(profiles.map(function (profile) { return profile.id; }));
+  let candidate = base;
+  let index = 2;
+  while (existingIds.has(candidate)) {
+    const suffix = "-" + index;
+    candidate = base.slice(0, 64 - suffix.length) + suffix;
+    index += 1;
+  }
+  return candidate;
+}
+
+function profileQuery() {
+  return "?profile_id=" + encodeURIComponent(activeProfile.id);
+}
+
+function renderProfileSwitcher() {
+  activeProfileName.textContent = activeProfile.name;
+  profileList.replaceChildren();
+
+  profiles.forEach(function (profile) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "profile-chip";
+    button.textContent = profile.name;
+    button.setAttribute("aria-pressed", String(profile.id === activeProfile.id));
+    button.classList.toggle("is-active", profile.id === activeProfile.id);
+    button.addEventListener("click", function () {
+      if (profile.id === activeProfile.id) {
+        return;
+      }
+      activeProfile = profile;
+      activePlaylist = null;
+      saveActiveProfile();
+      renderProfileSwitcher();
+      loadFavorites();
+    });
+    profileList.appendChild(button);
+  });
+}
+
+function addProfile() {
+  const name = window.prompt("Nombre del perfil");
+  if (!name || !name.trim()) {
+    return;
+  }
+
+  const trimmedName = name.trim().slice(0, 32);
+  const existingProfile = profiles.find(function (profile) {
+    return profile.name.toLocaleLowerCase("es-ES") === trimmedName.toLocaleLowerCase("es-ES");
+  });
+  if (existingProfile) {
+    activeProfile = existingProfile;
+  } else {
+    activeProfile = { id: createProfileId(trimmedName), name: trimmedName };
+    profiles.push(activeProfile);
+    saveProfiles();
+  }
+
+  activePlaylist = null;
+  saveActiveProfile();
+  renderProfileSwitcher();
+  loadFavorites();
+}
+
 function getSearchId(video, searchId) {
   if (Number.isInteger(searchId) && searchId > 0) {
     return searchId;
@@ -88,6 +258,10 @@ function normaliseFavoriteTrack(item) {
 
   return {
     video_id: videoId,
+    profile_id:
+      typeof item.profile_id === "string" && isValidProfileId(item.profile_id)
+        ? item.profile_id
+        : activeProfile.id,
     title:
       typeof item.title === "string" && item.title.trim()
         ? item.title.trim()
@@ -125,6 +299,7 @@ function favoriteFromVideo(video, searchId) {
     channel_title: video.channel_title,
     thumbnail_url: video.thumbnail_url,
     search_id: getSearchId(video, searchId),
+    profile_id: activeProfile.id,
     favorited_at: new Date().toISOString(),
   });
 }
@@ -177,6 +352,7 @@ async function toggleFavorite(video, searchId) {
     const response = await fetch(
       removing
         ? "/api/favorites/" + encodeURIComponent(favorite.video_id)
+          + profileQuery()
         : "/api/favorites",
       removing
         ? { method: "DELETE", headers: { Accept: "application/json" } }
@@ -401,7 +577,7 @@ function renderFavorites() {
   }
 
   if (favoriteTracks.length === 0) {
-    favoritesEmpty.textContent = "Aún no hay canciones favoritas.";
+    favoritesEmpty.textContent = "Aún no hay favoritas de " + activeProfile.name + ".";
     return;
   }
 
@@ -418,7 +594,7 @@ async function loadFavorites() {
   favoritesEmpty.hidden = false;
   favoritesEmpty.textContent = "Cargando favoritas…";
   try {
-    const response = await fetch("/api/favorites", {
+    const response = await fetch("/api/favorites" + profileQuery(), {
       headers: { Accept: "application/json" },
     });
     const payload = await response.json().catch(function () { return null; });
@@ -758,4 +934,6 @@ historyPanel.addEventListener("toggle", function () {
   }
 });
 
+addProfileButton.addEventListener("click", addProfile);
+renderProfileSwitcher();
 loadFavorites();

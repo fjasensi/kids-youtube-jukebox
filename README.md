@@ -17,6 +17,7 @@ browser without saving video or audio files to disk.
 - Up to twenty relevant YouTube search results.
 - Audio-only playback with the video thumbnail displayed as cover art.
 - Favorite songs stored in PostgreSQL for quick access without searching again.
+- Simple local favorite profiles such as Familia, Hija, and Yo, with no login.
 - Favorite playlist playback that advances automatically from one song to the next.
 - Pause, resume, and stop controls.
 - Optional Spanish voice search through the Web Speech API.
@@ -96,6 +97,21 @@ podman compose down
 
 The history remains in the `postgres_data` volume after `podman compose down`.
 It is deleted only if you explicitly remove the volume.
+
+### Safe maintenance commands
+
+This repository includes a `Makefile` with safe shortcuts for the live Podman
+setup:
+
+```sh
+make status
+make check
+make deploy-app
+make verify
+```
+
+`make deploy-app` rebuilds and restarts only the `jukebox` service with
+`--no-deps`; it does not recreate PostgreSQL or remove volumes.
 
 ### Run without PostgreSQL
 
@@ -180,17 +196,17 @@ PostgreSQL stores:
 - Every query, timestamp, status, result count, and search configuration.
 - The returned videos, including position, ID, title, channel, and thumbnail.
 - Every song that starts playing, linked to its original search.
-- The favorite songs list, including YouTube ID, title, channel, thumbnail, and
-  when each song was marked as favorite.
+- The favorite songs list per local profile, including YouTube ID, title,
+  channel, thumbnail, and when each song was marked as favorite.
 
 The **Recent history** section displays the latest searches and played songs.
 The same data is available through:
 
 - `GET /api/history?limit=20`
 - `POST /api/playback`
-- `GET /api/favorites`
+- `GET /api/favorites?profile_id=familia`
 - `POST /api/favorites`
-- `DELETE /api/favorites/{video_id}`
+- `DELETE /api/favorites/{video_id}?profile_id=familia`
 - `GET /health`
 
 Tables are created automatically at startup. To create a local backup:

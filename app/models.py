@@ -18,6 +18,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from app.profiles import DEFAULT_PROFILE_ID
+
 
 class Base(DeclarativeBase):
     pass
@@ -92,7 +94,10 @@ class FavoriteTrack(Base):
         ForeignKey("search_events.id", ondelete="SET NULL"),
         index=True,
     )
-    video_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    profile_id: Mapped[str] = mapped_column(
+        String(64), nullable=False, server_default=DEFAULT_PROFILE_ID
+    )
+    video_id: Mapped[str] = mapped_column(String(32), nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     channel_title: Mapped[str] = mapped_column(Text, nullable=False)
     thumbnail_url: Mapped[str] = mapped_column(Text, nullable=False)
@@ -100,4 +105,12 @@ class FavoriteTrack(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    __table_args__ = (Index("ix_favorite_tracks_favorited_at", "favorited_at"),)
+    __table_args__ = (
+        UniqueConstraint(
+            "profile_id",
+            "video_id",
+            name="uq_favorite_tracks_profile_video",
+        ),
+        Index("ix_favorite_tracks_favorited_at", "favorited_at"),
+        Index("ix_favorite_tracks_profile_favorited_at", "profile_id", "favorited_at"),
+    )

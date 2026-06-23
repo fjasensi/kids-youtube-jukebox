@@ -138,15 +138,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Disco Estrella", response.text)
         self.assertIn('id="audio-player"', response.text)
+        self.assertIn('id="profile-list"', response.text)
         self.assertIn('id="favorites-list"', response.text)
         self.assertIn('id="play-favorites-button"', response.text)
         self.assertNotIn("youtube.com/iframe_api", response.text)
 
-    def test_frontend_supports_favorites_playlist(self) -> None:
+    def test_frontend_supports_favorites_playlist_and_profiles(self) -> None:
         script = Path("app/static/app.js").read_text(encoding="utf-8")
 
         self.assertIn("/api/favorites", script)
-        self.assertNotIn("localStorage", script)
+        self.assertIn("localStorage", script)
+        self.assertIn("profile_id", script)
         self.assertIn("playNextFavorite", script)
         self.assertIn('audioPlayer.addEventListener("ended"', script)
 
@@ -270,7 +272,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(repository.history_limits, [5])
         self.assertTrue(health_response.json()["database"]["connected"])
 
-    def test_favorites_endpoints_persist_tracks(self) -> None:
+    def test_favorites_endpoints_persist_tracks_by_profile(self) -> None:
         repository = FakeHistoryRepository()
         app.dependency_overrides[get_history_repository] = lambda: repository
         favorite = {
@@ -279,21 +281,40 @@ class ApiTests(unittest.TestCase):
             "channel_title": "Disney",
             "thumbnail_url": "https://img.example/abc.jpg",
             "search_id": 41,
+            "profile_id": "hija",
         }
+        own_favorite = favorite | {"profile_id": "yo", "title": "Libre soy versión papá"}
 
         with TestClient(app) as client:
-            empty_response = client.get("/api/favorites")
+            empty_response = client.get("/api/favorites", params={"profile_id": "hija"})
             add_response = client.post("/api/favorites", json=favorite)
-            list_response = client.get("/api/favorites")
-            delete_response = client.delete("/api/favorites/abc123")
+            own_add_response = client.post("/api/favorites", json=own_favorite)
+            list_response = client.get("/api/favorites", params={"profile_id": "hija"})
+            own_list_response = client.get("/api/favorites", params={"profile_id": "yo"})
+            delete_response = client.delete(
+                "/api/favorites/abc123",
+                params={"profile_id": "hija"},
+            )
 
         self.assertEqual(empty_response.status_code, 200)
-        self.assertEqual(empty_response.json(), {"enabled": True, "favorites": []})
+        self.assertEqual(
+            empty_response.json(),
+            {"enabled": True, "profile_id": "hija", "favorites": []},
+        )
         self.assertEqual(add_response.status_code, 201)
+        self.assertEqual(add_response.json()["profile_id"], "hija")
         self.assertEqual(add_response.json()["favorite"]["video_id"], "abc123")
+        self.assertEqual(own_add_response.json()["favorite"]["profile_id"], "yo")
         self.assertEqual(list_response.json()["favorites"][0]["title"], "Libre soy")
-        self.assertEqual(delete_response.json(), {"enabled": True, "removed": True})
-        self.assertEqual(repository.removed_favorites, ["abc123"])
+        self.assertEqual(
+            own_list_response.json()["favorites"][0]["title"],
+            "Libre soy versión papá",
+        )
+        self.assertEqual(
+            delete_response.json(),
+            {"enabled": True, "profile_id": "hija", "removed": True},
+        )
+        self.assertEqual(repository.removed_favorites, [("hija", "abc123")])
 
     def test_audio_endpoint_proxies_range_requests(self) -> None:
         resolver = FakeAudioResolver()
@@ -344,8 +365,8 @@ class FakeHistoryRepository:
     def __init__(self) -> None:
         self.searches: list[dict[str, object]] = []
         self.history_limits: list[int] = []
-        self.favorites: list[dict[str, object]] = []
-        self.removed_favorites: list[str] = []
+        self.favorites_by_profile: dict[str, list[dict[str, object]]] = {}
+        self.removed_favorites: list[tuple[str, str]] = []
 
     async def record_search(
         self,
@@ -382,33 +403,45 @@ class FakeHistoryRepository:
         self.history_limits.append(limit)
         return {"enabled": True, "searches": [], "playbacks": []}
 
-    async def list_favorites(self) -> dict[str, object]:
-        return {"enabled": True, "favorites": self.favorites}
+    async def list_favorites(self, profile_id: str) -> dict[str, object]:
+        return {
+            "enabled": True,
+            "profile_id": profile_id,
+            "favorites": self.favorites_by_profile.get(profile_id, []),
+        }
 
     async def add_favorite(
         self,
         favorite: dict[str, str],
         search_id: int | None,
+        profile_id: str,
     ) -> dict[str, object]:
         saved = {
             "id": 3,
             "search_id": search_id,
+            "profile_id": profile_id,
             "video_id": favorite["video_id"],
             "title": favorite["title"],
             "channel_title": favorite["channel_title"],
             "thumbnail_url": favorite["thumbnail_url"],
             "favorited_at": "2026-06-23T16:30:00+00:00",
         }
-        self.favorites = [saved]
+        profile_favorites = [
+            item
+            for item in self.favorites_by_profile.get(profile_id, [])
+            if item["video_id"] != favorite["video_id"]
+        ]
+        self.favorites_by_profile[profile_id] = [saved] + profile_favorites
         return saved
 
-    async def remove_favorite(self, video_id: str) -> bool:
-        self.removed_favorites.append(video_id)
-        before = len(self.favorites)
-        self.favorites = [
-            item for item in self.favorites if item["video_id"] != video_id
+    async def remove_favorite(self, video_id: str, profile_id: str) -> bool:
+        self.removed_favorites.append((profile_id, video_id))
+        favorites = self.favorites_by_profile.get(profile_id, [])
+        before = len(favorites)
+        self.favorites_by_profile[profile_id] = [
+            item for item in favorites if item["video_id"] != video_id
         ]
-        return len(self.favorites) != before
+        return len(self.favorites_by_profile[profile_id]) != before
 
     async def ping(self) -> bool:
         return True

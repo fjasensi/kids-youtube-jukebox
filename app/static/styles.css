@@ -130,6 +130,57 @@ main {
   font-size: 1.35rem;
 }
 
+.profile-switcher {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.profile-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.profile-chip,
+.profile-add-button {
+  min-height: 46px;
+  border: 0;
+  border-radius: 15px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.profile-chip {
+  flex: 0 0 auto;
+  min-width: 82px;
+  max-width: 148px;
+  padding: 8px 14px;
+  overflow: hidden;
+  color: var(--text);
+  background: var(--panel-light);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-chip.is-active {
+  color: #2a1530;
+  background: var(--yellow);
+  box-shadow: 0 5px 0 #bb8d16;
+}
+
+.profile-add-button {
+  display: grid;
+  width: 46px;
+  place-items: center;
+  color: #172533;
+  background: var(--blue);
+  font-size: 1.35rem;
+}
+
 .player-frame {
   position: relative;
   overflow: hidden;
@@ -224,7 +275,9 @@ main {
 .play-button:active:not(:disabled),
 .favorite-button:active:not(:disabled),
 .favorite-play-all:active:not(:disabled),
-.favorite-icon-button:active:not(:disabled) {
+.favorite-icon-button:active:not(:disabled),
+.profile-chip:active:not(:disabled),
+.profile-add-button:active:not(:disabled) {
   transform: translateY(2px);
 }
 

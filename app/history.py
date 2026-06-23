@@ -8,6 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.models import FavoriteTrack, PlaybackEvent, SearchEvent, SearchResultRecord
+from app.profiles import DEFAULT_PROFILE_ID
 from app.settings import Settings
 
 
@@ -28,15 +29,16 @@ class HistoryRepository(Protocol):
 
     async def recent_history(self, limit: int) -> dict[str, Any]: ...
 
-    async def list_favorites(self) -> dict[str, Any]: ...
+    async def list_favorites(self, profile_id: str) -> dict[str, Any]: ...
 
     async def add_favorite(
         self,
         favorite: dict[str, str],
         search_id: int | None,
+        profile_id: str,
     ) -> dict[str, Any]: ...
 
-    async def remove_favorite(self, video_id: str) -> bool: ...
+    async def remove_favorite(self, video_id: str, profile_id: str) -> bool: ...
 
     async def ping(self) -> bool: ...
 
@@ -61,17 +63,20 @@ class NoOpHistoryRepository:
     async def recent_history(self, limit: int) -> dict[str, Any]:
         return {"enabled": False, "searches": [], "playbacks": []}
 
-    async def list_favorites(self) -> dict[str, Any]:
-        return {"enabled": False, "favorites": []}
+    async def list_favorites(self, profile_id: str = DEFAULT_PROFILE_ID) -> dict[str, Any]:
+        return {"enabled": False, "profile_id": profile_id, "favorites": []}
 
     async def add_favorite(
         self,
         favorite: dict[str, str],
         search_id: int | None,
+        profile_id: str = DEFAULT_PROFILE_ID,
     ) -> dict[str, Any]:
-        return {"enabled": False, "favorite": None}
+        return {"enabled": False, "profile_id": profile_id, "favorite": None}
 
-    async def remove_favorite(self, video_id: str) -> bool:
+    async def remove_favorite(
+        self, video_id: str, profile_id: str = DEFAULT_PROFILE_ID
+    ) -> bool:
         return False
 
     async def ping(self) -> bool:
@@ -171,12 +176,14 @@ class PostgresHistoryRepository:
             "playbacks": [_playback_to_dict(item) for item in playbacks],
         }
 
-    async def list_favorites(self) -> dict[str, Any]:
+    async def list_favorites(self, profile_id: str) -> dict[str, Any]:
         async with self._session_factory() as session:
             favorites = list(
                 (
                     await session.scalars(
-                        select(FavoriteTrack).order_by(
+                        select(FavoriteTrack)
+                        .where(FavoriteTrack.profile_id == profile_id)
+                        .order_by(
                             FavoriteTrack.favorited_at.desc(),
                             FavoriteTrack.id.desc(),
                         )
@@ -185,6 +192,7 @@ class PostgresHistoryRepository:
             )
         return {
             "enabled": True,
+            "profile_id": profile_id,
             "favorites": [_favorite_to_dict(item) for item in favorites],
         }
 
@@ -192,16 +200,19 @@ class PostgresHistoryRepository:
         self,
         favorite: dict[str, str],
         search_id: int | None,
+        profile_id: str,
     ) -> dict[str, Any]:
         async with self._session_factory() as session, session.begin():
             track = await session.scalar(
                 select(FavoriteTrack).where(
+                    FavoriteTrack.profile_id == profile_id,
                     FavoriteTrack.video_id == favorite["video_id"],
                 )
             )
             if track is None:
                 track = FavoriteTrack(
                     search_id=search_id,
+                    profile_id=profile_id,
                     video_id=favorite["video_id"],
                     title=favorite["title"],
                     channel_title=favorite["channel_title"],
@@ -218,10 +229,13 @@ class PostgresHistoryRepository:
             await session.refresh(track)
             return _favorite_to_dict(track)
 
-    async def remove_favorite(self, video_id: str) -> bool:
+    async def remove_favorite(self, video_id: str, profile_id: str) -> bool:
         async with self._session_factory() as session, session.begin():
             track = await session.scalar(
-                select(FavoriteTrack).where(FavoriteTrack.video_id == video_id)
+                select(FavoriteTrack).where(
+                    FavoriteTrack.profile_id == profile_id,
+                    FavoriteTrack.video_id == video_id,
+                )
             )
             if track is None:
                 return False
@@ -268,6 +282,7 @@ def _favorite_to_dict(favorite: FavoriteTrack) -> dict[str, Any]:
     return {
         "id": favorite.id,
         "search_id": favorite.search_id,
+        "profile_id": favorite.profile_id,
         "video_id": favorite.video_id,
         "title": favorite.title,
         "channel_title": favorite.channel_title,

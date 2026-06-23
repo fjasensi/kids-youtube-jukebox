@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from app.audio import AudioExtractionError, AudioResolver
 from app.database import open_database
 from app.history import HistoryRepository, NoOpHistoryRepository
+from app.profiles import DEFAULT_PROFILE_ID, PROFILE_ID_MAX_LENGTH, validate_profile_id
 from app.settings import Settings, get_settings
 from app.youtube import YouTubeSearchError, search_videos
 
@@ -55,6 +56,11 @@ class FavoriteCreate(BaseModel):
     channel_title: str = Field(min_length=1, max_length=500)
     thumbnail_url: str = Field(min_length=1, max_length=2000)
     search_id: int | None = Field(default=None, gt=0)
+    profile_id: str = Field(
+        default=DEFAULT_PROFILE_ID,
+        min_length=1,
+        max_length=PROFILE_ID_MAX_LENGTH,
+    )
 
 
 def get_history_repository(request: Request) -> HistoryRepository:
@@ -67,6 +73,18 @@ def get_history_repository(request: Request) -> HistoryRepository:
 
 def get_audio_resolver() -> AudioResolver:
     return audio_resolver
+
+
+def read_profile_id(
+    profile_id: Annotated[
+        str,
+        Query(min_length=1, max_length=PROFILE_ID_MAX_LENGTH),
+    ] = DEFAULT_PROFILE_ID,
+) -> str:
+    try:
+        return validate_profile_id(profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/", include_in_schema=False)
@@ -139,8 +157,9 @@ async def record_playback(
 @app.get("/api/favorites")
 async def favorites(
     repository: Annotated[HistoryRepository, Depends(get_history_repository)],
+    profile_id: Annotated[str, Depends(read_profile_id)],
 ) -> dict[str, object]:
-    return await repository.list_favorites()
+    return await repository.list_favorites(profile_id)
 
 
 @app.post("/api/favorites", status_code=201)
@@ -154,6 +173,11 @@ async def add_favorite(
             detail="Las favoritas requieren PostgreSQL en este servidor.",
         )
 
+    try:
+        profile_id = validate_profile_id(favorite.profile_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     saved = await repository.add_favorite(
         {
             "video_id": favorite.video_id,
@@ -162,14 +186,16 @@ async def add_favorite(
             "thumbnail_url": favorite.thumbnail_url,
         },
         favorite.search_id,
+        profile_id,
     )
-    return {"enabled": True, "favorite": saved}
+    return {"enabled": True, "profile_id": profile_id, "favorite": saved}
 
 
 @app.delete("/api/favorites/{video_id}")
 async def remove_favorite(
     video_id: str,
     repository: Annotated[HistoryRepository, Depends(get_history_repository)],
+    profile_id: Annotated[str, Depends(read_profile_id)],
 ) -> dict[str, object]:
     if not repository.enabled:
         raise HTTPException(
@@ -177,7 +203,11 @@ async def remove_favorite(
             detail="Las favoritas requieren PostgreSQL en este servidor.",
         )
 
-    return {"enabled": True, "removed": await repository.remove_favorite(video_id)}
+    return {
+        "enabled": True,
+        "profile_id": profile_id,
+        "removed": await repository.remove_favorite(video_id, profile_id),
+    }
 
 
 @app.get("/api/audio/{video_id}")
