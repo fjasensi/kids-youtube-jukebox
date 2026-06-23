@@ -7,6 +7,9 @@ const voiceButton = document.getElementById("voice-button");
 const clearButton = document.getElementById("clear-button");
 const statusBox = document.getElementById("status");
 const resultsBox = document.getElementById("results");
+const playFavoritesButton = document.getElementById("play-favorites-button");
+const favoritesEmpty = document.getElementById("favorites-empty");
+const favoritesList = document.getElementById("favorites-list");
 const playerSection = document.getElementById("player-section");
 const audioPlayer = document.getElementById("audio-player");
 const playerCover = document.getElementById("player-cover");
@@ -23,6 +26,9 @@ const searchHistory = document.getElementById("search-history");
 
 let currentTrack = null;
 let activeRequest = null;
+let activePlaylist = null;
+let favoritesEnabled = false;
+let favoriteTracks = [];
 
 function setStatus(message, kind) {
   statusBox.textContent = message || "";
@@ -48,6 +54,173 @@ function readApiError(response, payload) {
     return "Escribe una canción para buscar.";
   }
   return "Ha ocurrido un problema al buscar. Inténtalo otra vez.";
+}
+
+function readFavoriteApiError(response, payload) {
+  if (payload && typeof payload.detail === "string") {
+    return payload.detail;
+  }
+  if (response.status === 503) {
+    return "Las favoritas requieren PostgreSQL en este servidor.";
+  }
+  return "No se han podido guardar las favoritas.";
+}
+
+function getSearchId(video, searchId) {
+  if (Number.isInteger(searchId) && searchId > 0) {
+    return searchId;
+  }
+  if (video && Number.isInteger(video.search_id) && video.search_id > 0) {
+    return video.search_id;
+  }
+  return null;
+}
+
+function normaliseFavoriteTrack(item) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const videoId = typeof item.video_id === "string" ? item.video_id.trim() : "";
+  if (!videoId) {
+    return null;
+  }
+
+  return {
+    video_id: videoId,
+    title:
+      typeof item.title === "string" && item.title.trim()
+        ? item.title.trim()
+        : "Canción sin título",
+    channel_title:
+      typeof item.channel_title === "string" ? item.channel_title.trim() : "",
+    thumbnail_url:
+      typeof item.thumbnail_url === "string" ? item.thumbnail_url.trim() : "",
+    search_id: getSearchId(item),
+    favorited_at:
+      typeof item.favorited_at === "string"
+        ? item.favorited_at
+        : new Date().toISOString(),
+  };
+}
+
+function getFavoriteIndex(videoId) {
+  return favoriteTracks.findIndex(function (track) {
+    return track.video_id === videoId;
+  });
+}
+
+function isFavorite(videoId) {
+  return getFavoriteIndex(videoId) !== -1;
+}
+
+function favoriteFromVideo(video, searchId) {
+  if (!video || typeof video.video_id !== "string") {
+    return null;
+  }
+
+  return normaliseFavoriteTrack({
+    video_id: video.video_id,
+    title: video.title,
+    channel_title: video.channel_title,
+    thumbnail_url: video.thumbnail_url,
+    search_id: getSearchId(video, searchId),
+    favorited_at: new Date().toISOString(),
+  });
+}
+
+function setFavoriteButtonState(button, favorited) {
+  const title = button.dataset.favoriteTitle || "esta canción";
+  button.disabled = !favoritesEnabled;
+  button.classList.toggle("is-favorite", favorited);
+  button.setAttribute("aria-pressed", String(favorited));
+  button.textContent = favorited ? "★ Favorita" : "☆ Favorita";
+  button.setAttribute(
+    "aria-label",
+    favorited
+      ? "Quitar " + title + " de favoritas"
+      : "Añadir " + title + " a favoritas"
+  );
+}
+
+function updateFavoriteButtons(videoId) {
+  document.querySelectorAll("[data-favorite-video-id]").forEach(function (button) {
+    if (!videoId || button.dataset.favoriteVideoId === videoId) {
+      setFavoriteButtonState(button, isFavorite(button.dataset.favoriteVideoId));
+    }
+  });
+}
+
+function upsertFavoriteTrack(track) {
+  const existingIndex = getFavoriteIndex(track.video_id);
+  if (existingIndex === -1) {
+    favoriteTracks.unshift(track);
+  } else {
+    favoriteTracks.splice(existingIndex, 1, track);
+  }
+}
+
+async function toggleFavorite(video, searchId) {
+  const favorite = favoriteFromVideo(video, searchId);
+  if (!favorite) {
+    return;
+  }
+  if (!favoritesEnabled) {
+    setStatus("Las favoritas requieren PostgreSQL en este servidor.", "error");
+    return;
+  }
+
+  const removing = isFavorite(favorite.video_id);
+  setStatus("Guardando favoritas…", "loading");
+
+  try {
+    const response = await fetch(
+      removing
+        ? "/api/favorites/" + encodeURIComponent(favorite.video_id)
+        : "/api/favorites",
+      removing
+        ? { method: "DELETE", headers: { Accept: "application/json" } }
+        : {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify(favorite),
+          }
+    );
+    const payload = await response.json().catch(function () { return null; });
+    if (!response.ok) {
+      throw new Error(readFavoriteApiError(response, payload));
+    }
+
+    if (removing) {
+      favoriteTracks = favoriteTracks.filter(function (track) {
+        return track.video_id !== favorite.video_id;
+      });
+      setStatus("Quitada de favoritas.");
+    } else {
+      const saved = normaliseFavoriteTrack(payload && payload.favorite) || favorite;
+      upsertFavoriteTrack(saved);
+      setStatus("Añadida a favoritas.");
+    }
+
+    renderFavorites();
+    updateFavoriteButtons(favorite.video_id);
+  } catch (error) {
+    setStatus(error.message || "No se han podido guardar las favoritas.", "error");
+    loadFavorites();
+  }
+}
+
+function createFavoriteButton(video, searchId) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "favorite-button";
+  button.dataset.favoriteVideoId = video.video_id;
+  button.dataset.favoriteTitle = video.title;
+  setFavoriteButtonState(button, isFavorite(video.video_id));
+  button.addEventListener("click", function () {
+    toggleFavorite(video, searchId);
+  });
+  return button;
 }
 
 function createResultCard(result, searchId) {
@@ -81,7 +254,11 @@ function createResultCard(result, searchId) {
     playAudio(result, searchId);
   });
 
-  body.append(title, channel, playButton);
+  const actions = document.createElement("div");
+  actions.className = "result-card__actions";
+  actions.append(playButton, createFavoriteButton(result, searchId));
+
+  body.append(title, channel, actions);
   card.append(image, body);
   return card;
 }
@@ -165,24 +342,176 @@ clearButton.addEventListener("click", function () {
   searchInput.focus();
 });
 
+function createFavoriteItem(track, index) {
+  const row = document.createElement("article");
+  row.className = "favorite-item";
+
+  let media;
+  if (track.thumbnail_url) {
+    media = document.createElement("img");
+    media.src = track.thumbnail_url;
+    media.alt = "";
+    media.loading = "lazy";
+  } else {
+    media = document.createElement("div");
+    media.className = "favorite-item__placeholder";
+    media.textContent = "♪";
+    media.setAttribute("aria-hidden", "true");
+  }
+
+  const text = document.createElement("div");
+  text.className = "favorite-item__text";
+  const title = document.createElement("strong");
+  title.textContent = track.title;
+  const channel = document.createElement("span");
+  channel.textContent = track.channel_title || "Canal desconocido";
+  text.append(title, channel);
+
+  const playButton = document.createElement("button");
+  playButton.type = "button";
+  playButton.className = "favorite-icon-button";
+  playButton.textContent = "▶";
+  playButton.setAttribute("aria-label", "Reproducir favoritas desde " + track.title);
+  playButton.addEventListener("click", function () {
+    playFavoriteQueue(index);
+  });
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "favorite-icon-button favorite-icon-button--remove";
+  removeButton.textContent = "★";
+  removeButton.setAttribute("aria-label", "Quitar " + track.title + " de favoritas");
+  removeButton.addEventListener("click", function () {
+    toggleFavorite(track, track.search_id);
+  });
+
+  row.append(media, text, playButton, removeButton);
+  return row;
+}
+
+function renderFavorites() {
+  favoritesList.replaceChildren();
+  playFavoritesButton.disabled = !favoritesEnabled || favoriteTracks.length === 0;
+  favoritesEmpty.hidden = favoriteTracks.length > 0;
+
+  if (!favoritesEnabled) {
+    favoritesEmpty.hidden = false;
+    favoritesEmpty.textContent = "Favoritas no disponibles: PostgreSQL no está activo.";
+    return;
+  }
+
+  if (favoriteTracks.length === 0) {
+    favoritesEmpty.textContent = "Aún no hay canciones favoritas.";
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  favoriteTracks.forEach(function (track, index) {
+    fragment.appendChild(createFavoriteItem(track, index));
+  });
+  favoritesList.appendChild(fragment);
+}
+
+async function loadFavorites() {
+  favoritesEnabled = false;
+  playFavoritesButton.disabled = true;
+  favoritesEmpty.hidden = false;
+  favoritesEmpty.textContent = "Cargando favoritas…";
+  try {
+    const response = await fetch("/api/favorites", {
+      headers: { Accept: "application/json" },
+    });
+    const payload = await response.json().catch(function () { return null; });
+    if (!response.ok) {
+      throw new Error(readFavoriteApiError(response, payload));
+    }
+
+    favoritesEnabled = Boolean(payload && payload.enabled);
+    favoriteTracks = Array.isArray(payload && payload.favorites)
+      ? payload.favorites
+          .map(normaliseFavoriteTrack)
+          .filter(function (track) { return track !== null; })
+      : [];
+    renderFavorites();
+    updateFavoriteButtons();
+  } catch (error) {
+    favoritesEnabled = false;
+    favoriteTracks = [];
+    renderFavorites();
+    favoritesEmpty.textContent = error.message || "No se han podido cargar las favoritas.";
+    updateFavoriteButtons();
+  }
+}
+
+function playFavoriteQueue(startIndex) {
+  if (favoriteTracks.length === 0) {
+    setStatus("Marca canciones como favoritas para crear la lista.", "error");
+    return;
+  }
+
+  const tracks = favoriteTracks.slice();
+  const index = Math.max(0, Math.min(startIndex || 0, tracks.length - 1));
+  activePlaylist = { tracks: tracks, index: index };
+  playAudio(tracks[index], tracks[index].search_id, { fromPlaylist: true });
+}
+
+function playNextFavorite() {
+  if (!activePlaylist) {
+    return false;
+  }
+
+  const nextIndex = activePlaylist.index + 1;
+  if (nextIndex >= activePlaylist.tracks.length) {
+    activePlaylist = null;
+    nowPlaying.textContent = "Terminó la lista de favoritas";
+    setStatus("Lista de favoritas terminada.");
+    return true;
+  }
+
+  activePlaylist.index = nextIndex;
+  playAudio(
+    activePlaylist.tracks[nextIndex],
+    activePlaylist.tracks[nextIndex].search_id,
+    { fromPlaylist: true, scroll: false }
+  );
+  return true;
+}
+
+playFavoritesButton.addEventListener("click", function () {
+  playFavoriteQueue(0);
+});
+
 function enablePlayerControls() {
   pauseButton.disabled = false;
   resumeButton.disabled = false;
   stopButton.disabled = false;
 }
 
-function playAudio(video, searchId) {
+function playAudio(video, searchId, options) {
+  const playbackOptions = options || {};
+  if (!playbackOptions.fromPlaylist) {
+    activePlaylist = null;
+  }
+
   currentTrack = {
     videoId: video.video_id,
     title: video.title,
-    searchId: searchId,
+    searchId: getSearchId(video, searchId),
     recorded: false,
   };
-  playerCover.src = video.thumbnail_url;
-  playerCover.alt = "Portada de " + video.title;
-  playerCover.hidden = false;
-  playerPlaceholder.hidden = true;
-  nowPlaying.textContent = "Suena: " + video.title;
+  if (video.thumbnail_url) {
+    playerCover.src = video.thumbnail_url;
+    playerCover.alt = "Portada de " + video.title;
+    playerCover.hidden = false;
+    playerPlaceholder.hidden = true;
+  } else {
+    playerCover.removeAttribute("src");
+    playerCover.hidden = true;
+    playerPlaceholder.hidden = false;
+  }
+  nowPlaying.textContent = activePlaylist
+    ? "Favoritas " + (activePlaylist.index + 1) + "/" + activePlaylist.tracks.length + ": " + video.title
+    : "Suena: " + video.title;
   enablePlayerControls();
   setStatus("Preparando el audio…", "loading");
 
@@ -194,7 +523,9 @@ function playAudio(video, searchId) {
       setStatus("El audio está listo. Pulsa Reanudar para escucharlo.");
     });
   }
-  playerSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (playbackOptions.scroll !== false) {
+    playerSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 async function recordPlayback(searchId, videoId) {
@@ -230,11 +561,23 @@ audioPlayer.addEventListener("ended", function () {
   if (currentTrack) {
     nowPlaying.textContent = "Terminó: " + currentTrack.title;
   }
+  if (playNextFavorite()) {
+    return;
+  }
   setStatus("");
 });
 
 audioPlayer.addEventListener("error", function () {
   if (audioPlayer.getAttribute("src")) {
+    if (activePlaylist) {
+      if (activePlaylist.index + 1 < activePlaylist.tracks.length) {
+        setStatus("No se ha podido reproducir esta favorita. Pasando a la siguiente.", "error");
+        window.setTimeout(playNextFavorite, 900);
+        return;
+      }
+      activePlaylist = null;
+      nowPlaying.textContent = "Terminó la lista de favoritas";
+    }
     setStatus("No se ha podido reproducir esta canción. Prueba con otro resultado.", "error");
   }
 });
@@ -258,6 +601,7 @@ resumeButton.addEventListener("click", function () {
 });
 
 stopButton.addEventListener("click", function () {
+  activePlaylist = null;
   audioPlayer.pause();
   audioPlayer.removeAttribute("src");
   audioPlayer.load();
@@ -413,3 +757,5 @@ historyPanel.addEventListener("toggle", function () {
     loadHistory();
   }
 });
+
+loadFavorites();

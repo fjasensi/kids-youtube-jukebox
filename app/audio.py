@@ -59,7 +59,7 @@ class AudioResolver:
         self,
         results: list[dict[str, str]],
         *,
-        limit: int = 10,
+        limit: int = 20,
         batch_size: int = 10,
     ) -> list[dict[str, str]]:
         """Keep search order while discarding videos yt-dlp cannot resolve."""

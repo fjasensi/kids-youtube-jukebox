@@ -1,4 +1,4 @@
-"""Database tables for searches, returned videos, and playback events."""
+"""Database tables for searches, returned videos, playback events, and favorites."""
 
 from __future__ import annotations
 
@@ -81,3 +81,23 @@ class PlaybackEvent(Base):
     )
 
     __table_args__ = (Index("ix_playback_events_played_at", "played_at"),)
+
+
+class FavoriteTrack(Base):
+    __tablename__ = "favorite_tracks"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    search_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("search_events.id", ondelete="SET NULL"),
+        index=True,
+    )
+    video_id: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    channel_title: Mapped[str] = mapped_column(Text, nullable=False)
+    thumbnail_url: Mapped[str] = mapped_column(Text, nullable=False)
+    favorited_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (Index("ix_favorite_tracks_favorited_at", "favorited_at"),)

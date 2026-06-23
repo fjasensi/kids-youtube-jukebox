@@ -20,6 +20,7 @@ from app.youtube import YouTubeSearchError, search_videos
 
 
 STATIC_DIR = Path(__file__).parent / "static"
+SEARCH_RESULT_LIMIT = 20
 audio_resolver = AudioResolver()
 
 
@@ -46,6 +47,14 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 class PlaybackCreate(BaseModel):
     search_id: int = Field(gt=0)
     video_id: str = Field(min_length=1, max_length=32)
+
+
+class FavoriteCreate(BaseModel):
+    video_id: str = Field(min_length=1, max_length=32)
+    title: str = Field(min_length=1, max_length=500)
+    channel_title: str = Field(min_length=1, max_length=500)
+    thumbnail_url: str = Field(min_length=1, max_length=2000)
+    search_id: int | None = Field(default=None, gt=0)
 
 
 def get_history_repository(request: Request) -> HistoryRepository:
@@ -90,7 +99,7 @@ async def search(
 
     try:
         candidates = await search_videos(query, settings)
-        results = await resolver.filter_playable(candidates)
+        results = await resolver.filter_playable(candidates, limit=SEARCH_RESULT_LIMIT)
     except YouTubeSearchError as exc:
         await history.record_search(
             query,
@@ -125,6 +134,50 @@ async def record_playback(
             detail="El vídeo no pertenece a la búsqueda indicada.",
         )
     return {"recorded": True, "playback": recorded}
+
+
+@app.get("/api/favorites")
+async def favorites(
+    repository: Annotated[HistoryRepository, Depends(get_history_repository)],
+) -> dict[str, object]:
+    return await repository.list_favorites()
+
+
+@app.post("/api/favorites", status_code=201)
+async def add_favorite(
+    favorite: FavoriteCreate,
+    repository: Annotated[HistoryRepository, Depends(get_history_repository)],
+) -> dict[str, object]:
+    if not repository.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Las favoritas requieren PostgreSQL en este servidor.",
+        )
+
+    saved = await repository.add_favorite(
+        {
+            "video_id": favorite.video_id,
+            "title": favorite.title,
+            "channel_title": favorite.channel_title,
+            "thumbnail_url": favorite.thumbnail_url,
+        },
+        favorite.search_id,
+    )
+    return {"enabled": True, "favorite": saved}
+
+
+@app.delete("/api/favorites/{video_id}")
+async def remove_favorite(
+    video_id: str,
+    repository: Annotated[HistoryRepository, Depends(get_history_repository)],
+) -> dict[str, object]:
+    if not repository.enabled:
+        raise HTTPException(
+            status_code=503,
+            detail="Las favoritas requieren PostgreSQL en este servidor.",
+        )
+
+    return {"enabled": True, "removed": await repository.remove_favorite(video_id)}
 
 
 @app.get("/api/audio/{video_id}")

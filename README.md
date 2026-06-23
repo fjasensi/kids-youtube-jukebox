@@ -14,8 +14,10 @@ browser without saving video or audio files to disk.
 ## Features
 
 - Mobile-first interface with large touch targets.
-- Up to ten relevant YouTube search results.
+- Up to twenty relevant YouTube search results.
 - Audio-only playback with the video thumbnail displayed as cover art.
+- Favorite songs stored in PostgreSQL for quick access without searching again.
+- Favorite playlist playback that advances automatically from one song to the next.
 - Pause, resume, and stop controls.
 - Optional Spanish voice search through the Web Speech API.
 - Persistent PostgreSQL history for searches and played songs.
@@ -178,12 +180,17 @@ PostgreSQL stores:
 - Every query, timestamp, status, result count, and search configuration.
 - The returned videos, including position, ID, title, channel, and thumbnail.
 - Every song that starts playing, linked to its original search.
+- The favorite songs list, including YouTube ID, title, channel, thumbnail, and
+  when each song was marked as favorite.
 
 The **Recent history** section displays the latest searches and played songs.
 The same data is available through:
 
 - `GET /api/history?limit=20`
 - `POST /api/playback`
+- `GET /api/favorites`
+- `POST /api/favorites`
+- `DELETE /api/favorites/{video_id}`
 - `GET /health`
 
 Tables are created automatically at startup. To create a local backup:

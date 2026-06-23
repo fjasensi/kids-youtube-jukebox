@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -137,7 +138,17 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Disco Estrella", response.text)
         self.assertIn('id="audio-player"', response.text)
+        self.assertIn('id="favorites-list"', response.text)
+        self.assertIn('id="play-favorites-button"', response.text)
         self.assertNotIn("youtube.com/iframe_api", response.text)
+
+    def test_frontend_supports_favorites_playlist(self) -> None:
+        script = Path("app/static/app.js").read_text(encoding="utf-8")
+
+        self.assertIn("/api/favorites", script)
+        self.assertNotIn("localStorage", script)
+        self.assertIn("playNextFavorite", script)
+        self.assertIn('audioPlayer.addEventListener("ended"', script)
 
     def test_search_reports_missing_api_key(self) -> None:
         app.dependency_overrides[get_settings] = lambda: make_settings(api_key=None)
@@ -176,6 +187,29 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(repository.searches[0]["query"], "Frozen")
         self.assertEqual(repository.searches[0]["status"], "success")
+
+    def test_search_returns_up_to_twenty_playable_results(self) -> None:
+        app.dependency_overrides[get_settings] = make_settings
+        repository = FakeHistoryRepository()
+        app.dependency_overrides[get_history_repository] = lambda: repository
+        app.dependency_overrides[get_audio_resolver] = FakeAudioResolver
+        candidates = [
+            {
+                "video_id": f"video{index:06d}",
+                "title": f"Canción {index}",
+                "channel_title": "Canal",
+                "thumbnail_url": f"https://img.example/{index}.jpg",
+            }
+            for index in range(25)
+        ]
+
+        with patch("app.main.search_videos", new=AsyncMock(return_value=candidates)):
+            with TestClient(app) as client:
+                response = client.get("/api/search", params={"q": "infantil"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["results"]), 20)
+        self.assertEqual(len(repository.searches[0]["results"]), 20)
 
     def test_search_discards_results_without_audio(self) -> None:
         app.dependency_overrides[get_settings] = make_settings
@@ -236,6 +270,31 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(repository.history_limits, [5])
         self.assertTrue(health_response.json()["database"]["connected"])
 
+    def test_favorites_endpoints_persist_tracks(self) -> None:
+        repository = FakeHistoryRepository()
+        app.dependency_overrides[get_history_repository] = lambda: repository
+        favorite = {
+            "video_id": "abc123",
+            "title": "Libre soy",
+            "channel_title": "Disney",
+            "thumbnail_url": "https://img.example/abc.jpg",
+            "search_id": 41,
+        }
+
+        with TestClient(app) as client:
+            empty_response = client.get("/api/favorites")
+            add_response = client.post("/api/favorites", json=favorite)
+            list_response = client.get("/api/favorites")
+            delete_response = client.delete("/api/favorites/abc123")
+
+        self.assertEqual(empty_response.status_code, 200)
+        self.assertEqual(empty_response.json(), {"enabled": True, "favorites": []})
+        self.assertEqual(add_response.status_code, 201)
+        self.assertEqual(add_response.json()["favorite"]["video_id"], "abc123")
+        self.assertEqual(list_response.json()["favorites"][0]["title"], "Libre soy")
+        self.assertEqual(delete_response.json(), {"enabled": True, "removed": True})
+        self.assertEqual(repository.removed_favorites, ["abc123"])
+
     def test_audio_endpoint_proxies_range_requests(self) -> None:
         resolver = FakeAudioResolver()
         app.dependency_overrides[get_audio_resolver] = lambda: resolver
@@ -285,6 +344,8 @@ class FakeHistoryRepository:
     def __init__(self) -> None:
         self.searches: list[dict[str, object]] = []
         self.history_limits: list[int] = []
+        self.favorites: list[dict[str, object]] = []
+        self.removed_favorites: list[str] = []
 
     async def record_search(
         self,
@@ -321,6 +382,34 @@ class FakeHistoryRepository:
         self.history_limits.append(limit)
         return {"enabled": True, "searches": [], "playbacks": []}
 
+    async def list_favorites(self) -> dict[str, object]:
+        return {"enabled": True, "favorites": self.favorites}
+
+    async def add_favorite(
+        self,
+        favorite: dict[str, str],
+        search_id: int | None,
+    ) -> dict[str, object]:
+        saved = {
+            "id": 3,
+            "search_id": search_id,
+            "video_id": favorite["video_id"],
+            "title": favorite["title"],
+            "channel_title": favorite["channel_title"],
+            "thumbnail_url": favorite["thumbnail_url"],
+            "favorited_at": "2026-06-23T16:30:00+00:00",
+        }
+        self.favorites = [saved]
+        return saved
+
+    async def remove_favorite(self, video_id: str) -> bool:
+        self.removed_favorites.append(video_id)
+        before = len(self.favorites)
+        self.favorites = [
+            item for item in self.favorites if item["video_id"] != video_id
+        ]
+        return len(self.favorites) != before
+
     async def ping(self) -> bool:
         return True
 
@@ -339,7 +428,7 @@ class FakeAudioResolver:
         self,
         results: list[dict[str, str]],
         *,
-        limit: int = 10,
+        limit: int = 20,
         batch_size: int = 10,
     ) -> list[dict[str, str]]:
         if self.playable_video_ids is None:

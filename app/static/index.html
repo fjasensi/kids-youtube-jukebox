@@ -40,6 +40,20 @@
         </div>
       </section>
 
+      <section class="favorites-panel" aria-labelledby="favorites-title">
+        <div class="favorites-panel__header">
+          <div>
+            <p class="eyebrow">Siempre a mano</p>
+            <h2 id="favorites-title">Favoritas</h2>
+          </div>
+          <button id="play-favorites-button" class="favorite-play-all" type="button" disabled>
+            <span aria-hidden="true">▶</span> Reproducir lista
+          </button>
+        </div>
+        <p id="favorites-empty" class="favorites-empty">Aún no hay canciones favoritas.</p>
+        <div id="favorites-list" class="favorites-list" aria-live="polite"></div>
+      </section>
+
       <section class="search-panel" aria-labelledby="search-title">
         <h2 id="search-title">¿Qué quieres escuchar?</h2>
         <form id="search-form" novalidate>

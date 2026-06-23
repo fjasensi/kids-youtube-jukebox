@@ -1,4 +1,4 @@
-"""Persistence service for searches and playback history."""
+"""Persistence service for searches, playback history, and favorites."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any, Protocol
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.models import PlaybackEvent, SearchEvent, SearchResultRecord
+from app.models import FavoriteTrack, PlaybackEvent, SearchEvent, SearchResultRecord
 from app.settings import Settings
 
 
@@ -27,6 +27,16 @@ class HistoryRepository(Protocol):
     async def record_playback(self, search_id: int, video_id: str) -> dict[str, Any] | None: ...
 
     async def recent_history(self, limit: int) -> dict[str, Any]: ...
+
+    async def list_favorites(self) -> dict[str, Any]: ...
+
+    async def add_favorite(
+        self,
+        favorite: dict[str, str],
+        search_id: int | None,
+    ) -> dict[str, Any]: ...
+
+    async def remove_favorite(self, video_id: str) -> bool: ...
 
     async def ping(self) -> bool: ...
 
@@ -50,6 +60,19 @@ class NoOpHistoryRepository:
 
     async def recent_history(self, limit: int) -> dict[str, Any]:
         return {"enabled": False, "searches": [], "playbacks": []}
+
+    async def list_favorites(self) -> dict[str, Any]:
+        return {"enabled": False, "favorites": []}
+
+    async def add_favorite(
+        self,
+        favorite: dict[str, str],
+        search_id: int | None,
+    ) -> dict[str, Any]:
+        return {"enabled": False, "favorite": None}
+
+    async def remove_favorite(self, video_id: str) -> bool:
+        return False
 
     async def ping(self) -> bool:
         return False
@@ -148,6 +171,63 @@ class PostgresHistoryRepository:
             "playbacks": [_playback_to_dict(item) for item in playbacks],
         }
 
+    async def list_favorites(self) -> dict[str, Any]:
+        async with self._session_factory() as session:
+            favorites = list(
+                (
+                    await session.scalars(
+                        select(FavoriteTrack).order_by(
+                            FavoriteTrack.favorited_at.desc(),
+                            FavoriteTrack.id.desc(),
+                        )
+                    )
+                ).all()
+            )
+        return {
+            "enabled": True,
+            "favorites": [_favorite_to_dict(item) for item in favorites],
+        }
+
+    async def add_favorite(
+        self,
+        favorite: dict[str, str],
+        search_id: int | None,
+    ) -> dict[str, Any]:
+        async with self._session_factory() as session, session.begin():
+            track = await session.scalar(
+                select(FavoriteTrack).where(
+                    FavoriteTrack.video_id == favorite["video_id"],
+                )
+            )
+            if track is None:
+                track = FavoriteTrack(
+                    search_id=search_id,
+                    video_id=favorite["video_id"],
+                    title=favorite["title"],
+                    channel_title=favorite["channel_title"],
+                    thumbnail_url=favorite["thumbnail_url"],
+                )
+                session.add(track)
+            else:
+                track.search_id = search_id
+                track.title = favorite["title"]
+                track.channel_title = favorite["channel_title"]
+                track.thumbnail_url = favorite["thumbnail_url"]
+
+            await session.flush()
+            await session.refresh(track)
+            return _favorite_to_dict(track)
+
+    async def remove_favorite(self, video_id: str) -> bool:
+        async with self._session_factory() as session, session.begin():
+            track = await session.scalar(
+                select(FavoriteTrack).where(FavoriteTrack.video_id == video_id)
+            )
+            if track is None:
+                return False
+            await session.delete(track)
+            return True
+
     async def ping(self) -> bool:
         try:
             async with self._session_factory() as session:
@@ -181,4 +261,16 @@ def _playback_to_dict(playback: PlaybackEvent) -> dict[str, Any]:
         "channel_title": playback.channel_title,
         "thumbnail_url": playback.thumbnail_url,
         "played_at": playback.played_at.isoformat(),
+    }
+
+
+def _favorite_to_dict(favorite: FavoriteTrack) -> dict[str, Any]:
+    return {
+        "id": favorite.id,
+        "search_id": favorite.search_id,
+        "video_id": favorite.video_id,
+        "title": favorite.title,
+        "channel_title": favorite.channel_title,
+        "thumbnail_url": favorite.thumbnail_url,
+        "favorited_at": favorite.favorited_at.isoformat(),
     }
