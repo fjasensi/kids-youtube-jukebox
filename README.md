@@ -113,6 +113,18 @@ make verify
 `make deploy-app` rebuilds and restarts only the `jukebox` service with
 `--no-deps`; it does not recreate PostgreSQL or remove volumes.
 
+### Connect to PostgreSQL from DataGrip
+
+PostgreSQL is published only on localhost for local database tools:
+
+```text
+Host: 127.0.0.1
+Port: 15432
+Database: jukebox
+User: jukebox
+Password: jukebox_local
+```
+
 ### Run without PostgreSQL
 
 The image can run on its own, but history will be disabled:
